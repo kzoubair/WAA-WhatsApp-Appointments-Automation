@@ -78,7 +78,7 @@ EXECUTIONS_DATA_SAVE_ON_ERROR=all
 
 **Conséquence sur la feuille de route infra :** l'**urgence** du passage à PostgreSQL retombe. La pression sur SQLite venait en grande partie de ce CRON, pas de la charge patient réelle (un seul cabinet en test). La migration Postgres reste recommandée **avant le 3ᵉ cabinet** (pour l'écriture concurrente multi-tenant), mais n'est plus motivée par un risque de saturation disque à court terme.
 
-> **Autres constats du re-audit 05/08 (côté workflow, pour mémoire — détail dans README §14 / CHANGELOG) :** intégrité intacte (0 réf cassée / 0 orphelin / 0 cible inexistante) ; 2 autres dettes d'audit v28 également fermées (`nb_annulations || 0` ; `.item` retiré de `7-LA — Écrire patients_rdv`) ; `name` interne du JSON renommé (`WhatsApp_Appointment_Automation`) ; workflow `active`. Une dette mineure ouverte sans impact infra : `7-LA — Lire liste_attente` sans `alwaysOutputData`.
+> **Autres constats du re-audit 05/08 (côté workflow, pour mémoire — détail dans README §14 / CHANGELOG) :** intégrité intacte (0 réf cassée / 0 orphelin / 0 cible inexistante) ; 2 autres dettes d'audit v28 également fermées (`nb_annulations || 0` ; `.item` retiré de `7-LA — Écrire patients_rdv`) ; `name` interne du JSON renommé (`WhatsApp_Appointment_Automation`) ; workflow `active`. *(Mise à jour 08/08 : la dette mineure `7-LA — Lire liste_attente` sans `alwaysOutputData` est désormais fermée — voir entrée 08/08.)*
 
 ---
 
@@ -105,6 +105,18 @@ EXECUTIONS_DATA_SAVE_ON_ERROR=all
 
 ---
 
+### 08/08/2026 — Re-audit workflow + point credentials/config multi-tenant
+
+**Côté workflow (détail dans README §14 / CHANGELOG §28)** : nouvel export re-audité, toujours 136 nœuds, intégrité intacte, `active`. Deux dettes fermées (**BUG-CONV** sur `11c-WA`/`13-PRD` — cascade linguistique ; **`aod`** sur `7-LA — Lire liste_attente`). Résidus `.item` : 34 → 28.
+
+**Point ayant un impact infra / déploiement multi-tenant** (à traiter avant le 2ᵉ cabinet) :
+- 🟠 **`CRON — Notifier patient session expirée` — `phoneNumberId` en dur (`998215733371244`)**. La branche CRON part d'un `Schedule Trigger` distinct qui **ne traverse pas `00-CONFIG`**, donc la variable `PROD_PHONE_NUMBER_ID` n'y est pas propagée. En mono-cabinet c'est sans effet, mais **en multi-tenant chaque cabinet a son propre Phone Number ID** → ce littéral enverrait depuis le mauvais numéro. **À corriger via un mini-`Set` `CRON-CONFIG`** en tête de branche CRON (même logique que `00-CONFIG` mais pour le sous-graphe planifié). C'est la **2ᵉ zone du workflow hors couverture `00-CONFIG`** (rappel CHANGELOG : la branche CRON était déjà notée comme ne passant pas par CONFIG).
+- 🟠 **Credentials WhatsApp non homogènes** : 28 nœuds sur `UlsIZcI7TK8xx8vd`, mais `WhatsApp Trigger` sur `JQtraJodYSZJAHJN` (OAuth, normal — c'est le trigger) et `13-PRD — Demander prénom` sur `gd4yOWdWN1iwdMHX` (anormal — devrait être `UlsIZcI7TK8xx8vd`). **Implication backup/migration** : lors d'un `export:credentials`, vérifier que ces 3 IDs sont bien tous exportés ; en multi-tenant, prévoir un mapping credential→cabinet clair (un seul credential Send par WABA cliente).
+
+*Aucune action serveur/`.env` requise pour ces deux points — ce sont des corrections de câblage dans n8n, notées ici car elles conditionnent le déploiement multi-cabinet.*
+
+---
+
 ## Sauvegarde workflows/credentials (CLI n8n)
 
 Complément au snapshot VPS, pour versionner workflows + credentials en JSON directement depuis le conteneur :
@@ -116,4 +128,4 @@ docker exec -u node root-n8n-1 n8n export:credentials --backup --output=backups/
 
 ---
 
-*INFRA_NOTES — créé le 24/07/2026, dernière entrée le **05/08/2026**. Historique : (24/07) pruning des exécutions (14 j) + alignement fuseau `.env` sur `Africa/Casablanca` + décisions VACUUM (écarté) / PostgreSQL (à venir) ; (28/07) observation CRON trop fréquent ; (**05/08**) **CRON corrigé en `*/5 * * * *`** → volume d'exécutions ÷5, pression SQLite neutralisée, urgence Postgres retombée. Décisions futures : migration Postgres (avant 3ᵉ cabinet), upgrade KVM2, multi-tenant, backup quotidien automatique des workflows. Distinct du CHANGELOG workflow.*
+*INFRA_NOTES — créé le 24/07/2026, dernière entrée le **08/08/2026**. Historique : (24/07) pruning des exécutions (14 j) + alignement fuseau `.env` sur `Africa/Casablanca` + décisions VACUUM (écarté) / PostgreSQL (à venir) ; (28/07) observation CRON trop fréquent ; (05/08) **CRON corrigé en `*/5 * * * *`** → volume d'exécutions ÷5, pression SQLite neutralisée, urgence Postgres retombée ; (**08/08**) re-audit workflow (BUG-CONV + `aod` fermés) + point config multi-tenant : **`phoneNumberId` en dur sur la branche CRON** et **credentials WhatsApp non homogènes** à traiter avant le 2ᵉ cabinet. Décisions futures : migration Postgres (avant 3ᵉ cabinet), upgrade KVM2, multi-tenant, backup quotidien automatique des workflows. Distinct du CHANGELOG workflow.*

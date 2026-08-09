@@ -4,11 +4,13 @@
 
 ---
 
-## 📍 ÉTAT COURANT — v28, 28 Juillet 2026
+## 📍 ÉTAT COURANT — post-v28, 8 Août 2026
 
 **Phase :** finalisation du **Workflow 1** (Prise de RDV / Annulation / Report / **Inscription liste d'attente** / cascade refus). Développement en parallèle du **Workflow 2 (anti no-show / rappels)** et consolidation de la branche liste d'attente. Le contexte projet est **Zellia** (agence) / produit **Mimosa** (nom interne, jamais client-facing) — cabinet pilote **Dr Chaimaa Badrour, dentiste à Tanger** (`drbadrour.ma`).
 
-**Fichier workflow :** `WhatsApp_Appointment_Automation.json` — **136 nœuds** (dont 2 `NoOp`, 0 sticky note). Intégrité re-vérifiée à l'audit du 05/08/2026 : **0 référence `$('…')` cassée, 0 connexion vers nœud inexistant, 0 orphelin, 0 cible de connexion inexistante.** Workflow `active: true`.
+**Fichier workflow :** `WhatsApp_Appointment_Automation.json` — **136 nœuds** (dont 2 `NoOp`, 0 sticky note). Intégrité re-vérifiée à l'audit du **08/08/2026** : **0 référence `$('…')` cassée, 0 connexion vers nœud inexistant, 0 orphelin, 0 cible de connexion inexistante.** Workflow `active: true`.
+
+> 🆕 **Depuis le dernier export (vérifié 08/08/2026) :** **BUG-CONV clôturé** (`11c-WA` et `13-PRD` utilisent désormais le pattern cascade `SET → 7-MENU → 7-RDVEX → session 05`, plus de réponse français par défaut sur le sous-flux « choix RDV existant ») et **`alwaysOutputData` ajouté sur `7-LA — Lire liste_attente`**. Résidus `.item` réduits de 34 → **28**. Détail → CHANGELOG §28 + PARTIE A. **Dettes actives restantes** : `phoneNumberId` en dur sur `CRON — Notifier patient session expirée`, credential divergent sur `13-PRD`, préfixe `=` parasite sur `PROD_PHONE_NUMBER_ID`, placeholder `PROD_NOM_CABINET` (voir « Reste à faire »).
 
 > ✅ **`name` interne du JSON désormais renommé en `WhatsApp_Appointment_Automation`** (l'ancien avertissement sur `…v13Juillet27…_Change Fussha` est levé — le fichier a été proprement ré-exporté). Nom de fichier et `name` interne sont maintenant cohérents.
 
@@ -26,17 +28,20 @@
 - **Préférence stockée** : **aucune** (FIFO pur, tri par `date_demande` format triable `yyyy-MM-dd HH:mm`).
 - **Isolation d'état** : `attente_confirmation_inscription_LA` (inscription) **distinct** de `attente_confirmation_liste_attente` (cascade) — accepter *d'entrer* dans la file ≠ accepter *un créneau proposé*.
 
-**✅ Corrigé depuis le dernier export (vérifié à l'audit 05/08/2026) :**
+**✅ Corrigé depuis le dernier export (vérifié à l'audit 08/08/2026) :**
 1. ✅ **`name` interne du JSON renommé** (`WhatsApp_Appointment_Automation`) — cohérence version rétablie.
-2. ✅ **Les 3 dettes d'audit v28 sont fermées dans le fichier courant** (détail §14) :
-   - CRON : `Schedule Trigger` passe en `cronExpression = */5 * * * *` (toutes les 5 min) ✅
-   - `7-ACR-SET — Préparer données RDV` : `nb_annulations` a désormais le fallback `={{ $json.nb_annulations || 0 }}` ✅
-   - `7-LA — Écrire patients_rdv` : **plus aucun `.item`** — le nœud n'en contient plus (vérifié) ✅
+2. ✅ **Les 3 dettes d'audit v28 fermées** (CRON `*/5 * * * *`, `nb_annulations || 0`, `.item` retiré de `7-LA — Écrire patients_rdv`).
+3. ✅ **BUG-CONV clôturé (nouveau)** : `11c-WA — Bloquer doublon RDV` et `13-PRD — Demander prénom` lisaient `SET — Profil linguistique final` en direct alors qu'ils sont atteignables via `7-MENU`/`7-RDVEX` (sous-flux « choix RDV existant ») où ce nœud n'est jamais exécuté → réponse français par défaut. **Corrigé** : pattern cascade `SET → 7-MENU → 7-RDVEX → session 05` en try/catch (défaut `inconnu`), vérifié dans le `textBody` des deux nœuds.
+4. ✅ **`alwaysOutputData` ajouté sur `7-LA — Lire liste_attente` (nouveau)** : le lookup `telephone` + `statut=en_attente` ne tue plus la branche en silence quand le patient qui annule n'était pas lui-même en attente.
 
 **Reste à faire :**
-1. **Valider le chemin NON de l'inscription LA** + les nouveaux sous-flux (ESCAPE, choix RDV existant, RDV expiré) en conditions réelles.
-2. **Ajouter `alwaysOutputData` à `7-LA — Lire liste_attente`** (nouvelle dette mineure relevée le 05/08 — voir §14) : ce lookup (`telephone` + `statut=en_attente`) peut légitimement renvoyer 0 ligne sur la branche « le patient qui annule était-il lui-même en attente ? » ; sans `aod`, la branche meurt en silence.
-3. **Homogénéiser les résidus `.item` restants** (34 au total, dont 9 après un nœud qui change le compte/l'ordre — voir §14). Aucun n'est bloquant en mono-patient, mais à durcir en `.first()` par hygiène avant toute introduction de batch.
+1. **Valider le chemin NON de l'inscription LA** + les sous-flux (ESCAPE, choix RDV existant, RDV expiré) en conditions réelles.
+2. 🟠 **Câbler `phoneNumberId` sur `CRON — Notifier patient session expirée`** — actuellement en dur `998215733371244` (28 autres nœuds Send utilisent `PROD_PHONE_NUMBER_ID`). La branche CRON part d'un trigger séparé et **ne traverse pas `00-CONFIG`** → ajouter un mini-`Set` `CRON-CONFIG` en tête de branche CRON qui redéfinit `PROD_PHONE_NUMBER_ID`. **Bloquant multi-cabinet.**
+3. 🟠 **Aligner le credential de `13-PRD — Demander prénom`** sur `UlsIZcI7TK8xx8vd` (utilise aujourd'hui `gd4yOWdWN1iwdMHX`). Corriger au passage son `.item` résiduel (`$('02 — Extraire données message').item` → `.first()`).
+4. 🟠 **Nettoyer `PROD_PHONE_NUMBER_ID` dans `00-CONFIG`** : la valeur est `=998215733371244` (préfixe `=` parasite → champ Fixed évalué comme expression). Remettre `998215733371244` **sans** `=`.
+5. 🟠 **Renseigner `PROD_NOM_CABINET`** : encore le placeholder `Centre dentaire Dr. X`. Mettre le vrai libellé cabinet Badrour **avant toute démo/mise en prod client-facing.**
+6. 🟡 **Ajouter `alwaysOutputData` à `7-ACA-SHT0 — Lire RDV patient`** (lecture critique sans `aod` → silent branch death si 0 RDV).
+7. 🟡 **Homogénéiser les 28 résidus `.item`** restants. Aucun n'est bloquant en mono-patient, mais à durcir en `.first()`/`.last()` par hygiène avant toute introduction de batch.
 
 **Contexte v16 (rappel — campagne de test antérieure) :** Workflow 1 fonctionnellement clos, campagne T1–T6 passée (50/50), bug T2.8 (annulation darija → réponse français au lieu de fusha) résolu. Détail → CHANGELOG.
 
@@ -107,7 +112,7 @@ n8n et OpenAI sont **invisibles** pour le client — ils tournent en coulisse.
 ## 4. WORKFLOW CONSTRUIT — GESTION RDV CABINET MÉDICAL
 
 ### Fichiers livrés
-- `WhatsApp_Appointment_Automation.json` — workflow n8n **v28** complet à importer *(136 nœuds dont 2 NoOp, 0 sticky). Template multi-cabinet ; cabinet pilote Dr Ch. BADROUR ; nom médecin bilingue (`projeter()` + `PROD_NOM_MEDECIN_FR`/`_AR`) ; branches ESCAPE / choix RDV existant / RDV expiré ; timezone `Africa/Casablanca` ; sélecteurs d'onglet Sheets en mode « By name » ; Phone Number ID Meta externalisé (`PROD_PHONE_NUMBER_ID`). ✅ `name` interne cohérent, workflow `active`. 3 dettes d'audit v28 fermées (CRON 5 min, `nb_annulations || 0`, `.item` retiré de `7-LA — Écrire patients_rdv`).*
+- `WhatsApp_Appointment_Automation.json` — workflow n8n **post-v28** complet à importer *(136 nœuds dont 2 NoOp, 0 sticky). Template multi-cabinet ; cabinet pilote Dr Ch. BADROUR ; nom médecin bilingue (`projeter()` + `PROD_NOM_MEDECIN_FR`/`_AR`) ; branches ESCAPE / choix RDV existant / RDV expiré ; timezone `Africa/Casablanca` ; sélecteurs d'onglet Sheets en mode « By name » ; Phone Number ID Meta externalisé (`PROD_PHONE_NUMBER_ID`). ✅ `name` interne cohérent, workflow `active`. Dettes fermées : les 3 d'audit v28 (CRON 5 min, `nb_annulations || 0`, `.item` retiré de `7-LA — Écrire`) + **BUG-CONV** (cascade `11c-WA`/`13-PRD`) + **`aod` sur `7-LA — Lire liste_attente`**. Dettes actives résiduelles : `phoneNumberId` CRON en dur, credential `13-PRD`, `=` parasite sur `PROD_PHONE_NUMBER_ID`, placeholder `PROD_NOM_CABINET` (voir §14).*
 - `README_PROJET_CONTEXTE_V17-17Juillet26.md` — ce document
 
 ### Architecture générale (v10)
@@ -287,7 +292,7 @@ Le System Prompt du nœud 08 retourne `mode_ecriture` avec désormais **7 valeur
    - Invalide → renvoie le menu créneaux
 7. Libère la session (`libre`)
 
-> ⚠️ **(v28) Dette ouverte sur `7-ACR-SET`** : `nb_annulations` = `={{ $json.nb_annulations }}` **sans fallback**. Pour un nouveau patient (0 ligne dans `patients_rdv`), `7-ACR-LIRE` (aod=ON) renvoie un item vide → `undefined` écrit en cellule. **Fix à appliquer : `={{ $json.nb_annulations || 0 }}`.** Voir §14.
+> ✅ **(résolu post-v28) `7-ACR-SET` / `nb_annulations`** : le champ vaut désormais `={{ $json.nb_annulations || 0 }}` — un nouveau patient (item vide de `7-ACR-LIRE` en aod) écrit `0` au lieu de `undefined`. Maillon final de T4.9 posé. Voir §14.
 
 **🆕 (v28) Sous-branche « Choix RDV existant » (patient qui a déjà un RDV et redemande) :**
 
@@ -851,24 +856,29 @@ La conformité réglementaire est positionnée comme un **service add-on à vale
 
 > Uniquement les dettes **ouvertes**. Les dettes résolues (v9→v14) sont archivées dans le CHANGELOG.
 
-### ✅ Dettes d'audit v28 — TOUTES FERMÉES (vérifié 05/08/2026)
+### ✅ Dettes fermées et vérifiées présentes dans le JSON courant (08/08/2026)
 
-> Les 3 dettes relevées au 28/07 ont été corrigées et confirmées présentes dans `WhatsApp_Appointment_Automation.json`. Conservées ici en trace courte ; détail dans le CHANGELOG.
+> Corrigées et confirmées dans `WhatsApp_Appointment_Automation.json`. Trace courte ; détail dans le CHANGELOG (PARTIE A + §28).
 
-- ✅ **CRON chaque minute → 5 min** : `Schedule Trigger` est désormais en `rule.interval = [{ field: 'cronExpression', expression: '*/5 * * * *' }]`. Plus de tournoiement à vide chaque minute.
-- ✅ **`7-ACR-SET` / `nb_annulations` sans fallback** : le champ vaut maintenant `={{ $json.nb_annulations || 0 }}` — un nouveau patient (item vide de `7-ACR-LIRE` en aod) écrit `0`, plus `undefined`. Maillon final de T4.9 posé.
-- ✅ **`.item` résiduel dans `7-LA — Écrire patients_rdv`** : le nœud ne contient **plus aucun `.item`** (ni sur `7-LA-IF`, ni sur `7-LA-CAL`). Corrigé.
+- ✅ **CRON chaque minute → 5 min** : `Schedule Trigger` en `rule.interval = [{ field: 'cronExpression', expression: '*/5 * * * *' }]`.
+- ✅ **`7-ACR-SET` / `nb_annulations` sans fallback** : champ = `={{ $json.nb_annulations || 0 }}`. Maillon final de T4.9 posé.
+- ✅ **`.item` résiduel dans `7-LA — Écrire patients_rdv`** : plus aucun `.item` dans le nœud.
+- ✅ **BUG-CONV (`11c-WA` / `13-PRD`)** : lecture nue de `SET — Profil linguistique final` sur un chemin où il n'est pas exécuté (`7-MENU`/`7-RDVEX`) → réponse français par défaut. **Corrigé** par pattern cascade `SET → 7-MENU → 7-RDVEX → session 05` (try/catch, défaut `inconnu`), vérifié dans le `textBody` des deux nœuds.
+- ✅ **`7-LA — Lire liste_attente` sans `alwaysOutputData`** : `aod = true` activé — plus de branche morte silencieuse sur le lookup `telephone`+`statut=en_attente` quand 0 résultat est légitime.
 
-### 🆕 Dette détectée à l'audit du 05/08/2026
+### 🟠 Dettes actives détectées à l'audit du 08/08/2026
 
-- 🟡 **`7-LA — Lire liste_attente` sans `alwaysOutputData`** : ce lookup filtre `telephone` + `statut=en_attente`. Il est atteint sur la branche annulation (« le patient qui vient d'annuler était-il lui-même inscrit en liste d'attente ? ») où **0 résultat est un cas parfaitement normal**. Sans `aod`, un 0-résultat fait **mourir la branche en silence** (aucun item émis → nœuds avals non exécutés). **Fix : ouvrir le nœud → Options → activer `Always Output Data`.** *À rapprocher du 🟡 « code mort » plus bas : toutes les lectures Sheets où 0 ligne est légitime doivent avoir `aod=ON` — les autres lectures critiques (`11-PRD`, `11a-PRD`, `7-ACA-SHT2`, `ANNUL`, `REPORT`, `7-LA — Chercher suivant LA`, `05`) l'ont déjà, seul ce nœud manquait à l'appel.*
+- 🟠 **`CRON — Notifier patient session expirée` — `phoneNumberId` en dur** : le nœud envoie `998215733371244` littéral, alors que les **28 autres nœuds WhatsApp Send** utilisent `={{ $('00-CONFIG …').first().json.PROD_PHONE_NUMBER_ID }}`. La branche CRON part d'un **`Schedule Trigger` séparé qui ne traverse pas `00-CONFIG`** → `.first()` sur ce nœud n'est pas fiable dans le run CRON isolé. **Fix recommandé : insérer un mini-`Set` `CRON-CONFIG`** en tête de branche CRON redéfinissant `PROD_PHONE_NUMBER_ID` (et `PROD_NUMERO_SECRETAIRE` si un jour la notif secrétaire y arrive), puis référencer ce Set. **Bloquant multi-cabinet** (Phone Number ID propre à chaque cabinet).
+- 🟠 **`13-PRD — Demander prénom` — credential divergent** : utilise `gd4yOWdWN1iwdMHX` (« …account-Send Message ») au lieu de `UlsIZcI7TK8xx8vd` (le reste du workflow, 28 nœuds). Marche tant que les deux tokens pointent la même WABA ; casse en multi-tenant ou si l'un expire. **Aligner sur `UlsIZcI7TK8xx8vd`.** Corriger au passage son unique `.item` résiduel (`$('02 — Extraire données message').item.json.telephone` → `.first()`).
+- 🟠 **`PROD_PHONE_NUMBER_ID` — valeur `=998215733371244`** : le préfixe `=` parasite fait interpréter le champ **Fixed** comme une expression. « Marche par accident » (l'expression retourne le nombre) mais à nettoyer : valeur Fixed = `998215733371244` **sans** `=`.
+- 🟡 **`7-ACA-SHT0 — Lire RDV patient` sans `alwaysOutputData`** : lecture critique sans `aod` → si le patient n'a aucun RDV, la branche peut mourir en silence. Activer `Always Output Data` par cohérence avec les autres lookups.
 
 ### 🟡 Résidus `.item` restants (hygiène, non bloquant)
 
-- 🟡 **34 occurrences `.item` subsistent** dans le workflow, réparties sur 18 nœuds. **Classification à l'audit 05/08 :** 25 sont **sûres** (source = nœud `Set`/`Code` en amont direct, pairing 1:1 garanti) ; **9 sont « à risque »** car la source change le compte/l'ordre d'items — mais **aucune n'est un bug dans le flux nominal** (1 patient = 1 item) :
-  - `7-ACA-SHT — Marquer RDV annulé` → `$('7-ACA-IF — Confirme annulation ?').item` (×7 colonnes). Un IF préserve le pairing → OK tant qu'un seul item traverse la branche « confirme ». **Sûr en pratique.**
-  - `7-LA — Marquer LA traitée` → `$('7-LA — Lire liste_attente').item`. Source = lookup Sheets : ambigu si >1 ligne matche. **Risque théorique faible** (un patient a normalement 1 entrée LA active) — c'est le seul des 9 qui mérite un `.first()` par précaution.
-  - `7-LA-WA— Notifier secrétaire` → `$('7-LA-CAL — Créer RDV').item`. Calendar create = 1 événement/item → pairing 1:1. **Sûr.**
+- 🟡 **28 occurrences `.item` subsistent** dans le workflow (réduites de 34 → 28 depuis le dernier export). **Aucune n'est un bug dans le flux nominal** (1 patient = 1 item). Les cas à durcir en priorité restent les sources qui changent le compte/l'ordre :
+  - `7-ACA-SHT — Marquer RDV annulé` → `$('7-ACA-IF — Confirme annulation ?').item` (×7 colonnes). IF → pairing préservé. **Sûr en pratique.**
+  - `7-LA — Marquer LA traitée` → `$('7-LA — Lire liste_attente').item`. Source = lookup Sheets, ambigu si >1 ligne matche → mérite un `.first()` par précaution.
+  - `13-PRD — Demander prénom` → `$('02 — Extraire données message').item` (voir dette credential ci-dessus).
   - *À durcir en `.first()`/`.last()` sur un nœud nommé avant toute introduction de traitement par lot. Priorité basse.*
 
 ### Dettes reportées des versions précédentes
@@ -880,7 +890,7 @@ La conformité réglementaire est positionnée comme un **service add-on à vale
 - 🟡 **Amélioration message T3.7** : un patient envoyant une image seule reçoit « messages vocaux non supportés » (mélange image/vocal). Message à préciser.
 - ⚪ **Code mort darija/mixte** : branches `darija_*`/`mixte` inatteignables dans ~14 textBody (la projection ne produit que `francais_correct`/`arabe_fussha`). Inoffensif, hors chemin critique. Nettoyage prévu post-clôture.
 - ⚪ **Formatage de date dupliqué** (`ANNUL — Demander confirmation`, `11c-WA`, `7-ACA-WA — Notifier patient en attente`, `7-LA-WA — Confirmer`, `7-LA-WA — Notifier suivant`) : recalcul inline. Sortie correcte — dette d'architecture. La variable `FMT_DATE_PATIENT` a été ajoutée à `00-CONFIG` (v28) mais **n'est pas encore généralisée** ; à câbler pour centraliser. *`eval` du helper bloqué par la sandbox n8n dans les expressions — passer par un Code node si centralisation.*
-- ⚪ **`PROD_NOM_CABINET`** reste placeholder `Centre dentaire Dr. X` — à renseigner seulement si un message doit afficher le nom du cabinet.
+> *(`PROD_NOM_CABINET` placeholder `Centre dentaire Dr. X` — désormais listé en dette active 🟠 client-facing plus haut, à renseigner avant démo.)*
 
 ### ✅ Dettes clôturées depuis v17
 
@@ -903,4 +913,4 @@ La conformité réglementaire est positionnée comme un **service add-on à vale
 
 ---
 
-*README v28 — dernière synchronisation le **05/08/2026** après re-audit complet du fichier `WhatsApp_Appointment_Automation.json` (136 nœuds ; intégrité : 0 réf cassée / 0 orphelin / 0 cible inexistante ; `active: true`). Changements de fond vs v17 (inchangés) : cabinet pilote **Dr Ch. BADROUR** (Tanger), **nom médecin bilingue** (`projeter()` + `PROD_NOM_MEDECIN_FR`/`_AR`), **branche ESCAPE** (token `00`), **sous-flux « choix RDV existant »** (`11c`→`7-RDVEX`, 1=report/2=annulation), **`7-ACA-IF4 — RDV déjà passé ?`** (skip cascade LA si créneau expiré), **`7-ACR-LIRE`** en prise de RDV, **bug T2.8 clôturé** (cascade `modeFrais`→`modeSession`→`inconnu` vérifiée dans le champ `contexte`). **✅ Les 3 dettes d'audit v28 sont désormais fermées dans le fichier** : CRON `*/5 * * * *`, `nb_annulations || 0`, `.item` retiré de `7-LA — Écrire patients_rdv`. **✅ `name` interne renommé.** 🆕 Nouvelle dette mineure relevée le 05/08 : `7-LA — Lire liste_attente` sans `alwaysOutputData` (§14). Historique complet → `CHANGELOG_v7-v28_Workflow1.md`. Détail infra → `INFRA_NOTES.md`.*
+*README post-v28 — dernière synchronisation le **08/08/2026** après re-audit complet du fichier `WhatsApp_Appointment_Automation.json` (136 nœuds ; intégrité : 0 réf cassée / 0 orphelin / 0 cible inexistante ; `active: true`). Changements de fond vs v17 (inchangés) : cabinet pilote **Dr Ch. BADROUR** (Tanger), **nom médecin bilingue** (`projeter()` + `PROD_NOM_MEDECIN_FR`/`_AR`), **branche ESCAPE** (token `00`), **sous-flux « choix RDV existant »** (`11c`→`7-RDVEX`, 1=report/2=annulation), **`7-ACA-IF4 — RDV déjà passé ?`** (skip cascade LA si créneau expiré), **`7-ACR-LIRE`** en prise de RDV, **bug T2.8 clôturé**. **✅ Fermées et vérifiées dans le fichier** : 3 dettes d'audit v28 (CRON `*/5 * * * *`, `nb_annulations || 0`, `.item` de `7-LA — Écrire`) + **BUG-CONV** (cascade `11c-WA`/`13-PRD`) + **`aod` sur `7-LA — Lire liste_attente`** + `name` interne renommé. 🟠 **Dettes actives restantes** : `phoneNumberId` en dur sur `CRON — Notifier patient session expirée`, credential divergent sur `13-PRD`, préfixe `=` parasite sur `PROD_PHONE_NUMBER_ID`, placeholder `PROD_NOM_CABINET`, `aod` manquant sur `7-ACA-SHT0` (§14). Historique complet → `CHANGELOG_v7-v28_Workflow1.md`. Détail infra → `INFRA_NOTES.md`.*
